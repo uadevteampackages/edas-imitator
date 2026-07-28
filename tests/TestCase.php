@@ -1,16 +1,46 @@
 <?php
 
-namespace Tests;
+namespace Uadevteampackages\Imitator\Tests;
 
-use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
-use Laravel\Fortify\Features;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Orchestra\Testbench\TestCase as Orchestra;
+use Uadevteampackages\Imitator\ImitatorServiceProvider;
+use Uadevteampackages\Imitator\Tests\Models\User;
 
-abstract class TestCase extends BaseTestCase
+abstract class TestCase extends Orchestra
 {
-    protected function skipUnlessFortifyHas(string $feature, ?string $message = null): void
+    use RefreshDatabase;
+
+    protected function getPackageProviders($app): array
     {
-        if (! Features::enabled($feature)) {
-            $this->markTestSkipped($message ?? "Fortify feature [{$feature}] is not enabled.");
-        }
+        return [
+            ImitatorServiceProvider::class,
+        ];
+    }
+
+    protected function defineEnvironment($app): void
+    {
+        $app->detectEnvironment(fn (): string => 'local');
+        $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
+        $app['config']->set('app.env', 'local');
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.connections.testing', [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
+        ]);
+        $app['config']->set('auth.providers.users.model', User::class);
+        $app['config']->set('imitator.user_model', User::class);
+        $app['config']->set('imitator.inject_banner', true);
+        $app['config']->set('imitator.azure', [
+            'tenant_id' => 'test-tenant',
+            'client_id' => 'test-client',
+            'client_secret' => 'test-secret',
+        ]);
+    }
+
+    protected function defineDatabaseMigrations(): void
+    {
+        $this->loadMigrationsFrom(__DIR__.'/database/migrations');
     }
 }
