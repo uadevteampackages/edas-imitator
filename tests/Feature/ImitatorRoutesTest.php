@@ -6,6 +6,7 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Uadevteampackages\Imitator\Tests\Models\User;
+use Uadevteampackages\Imitator\Tests\Support\FakeUsernamePrincipalResolver;
 use Uadevteampackages\Imitator\Tests\TestCase;
 
 class ImitatorRoutesTest extends TestCase
@@ -60,6 +61,40 @@ class ImitatorRoutesTest extends TestCase
 
         $this->assertAuthenticatedAs(User::query()->findOrFail('target-id'));
         $this->assertSame('admin-id', session('imitator.original_user_id'));
+    }
+
+    public function test_store_writes_configured_session_attributes(): void
+    {
+        config([
+            'imitator.session' => [
+                'username' => 'okta_principal',
+                'okta.name' => 'name',
+                'okta.session_expires_at' => 'preserve',
+            ],
+            'okta-oidc.principal_resolver' => FakeUsernamePrincipalResolver::class,
+        ]);
+
+        $admin = $this->makeUser('admin-id', 'Admin');
+        $expiresAt = now()->addHour()->toIso8601String();
+
+        $this->actingAs($admin)
+            ->withSession([
+                'username' => 'admin',
+                'okta.session_expires_at' => $expiresAt,
+            ])
+            ->post('/imitator', [
+                'user' => [
+                    'id' => 'target-id',
+                    'name' => 'Target User',
+                    'userPrincipalName' => 'target@ua.edu',
+                    'email' => 'target@ua.edu',
+                ],
+            ])
+            ->assertRedirect('/');
+
+        $this->assertSame('target', session('username'));
+        $this->assertSame('Target User', session('okta.name'));
+        $this->assertSame($expiresAt, session('okta.session_expires_at'));
     }
 
     public function test_destroy_stops_imitation_and_redirects_to_imitator(): void

@@ -70,7 +70,7 @@ class ImitatorController extends Controller
 
         $target = $this->imitator->upsertUserFromEntra($validated['user']);
 
-        $this->imitator->start($original, $target);
+        $this->imitator->start($original, $target, $validated['user']);
 
         Log::info('Imitator: started', [
             'original_user_id' => $original->getAuthIdentifier(),

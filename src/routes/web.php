@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use Uadevteampackages\Imitator\Http\Controllers\ImitatorController;
 
-Route::middleware(['web', 'auth', 'imitator.local'])
+Route::middleware(config('imitator.middleware', ['web', 'imitator.auth', 'imitator.local']))
     ->prefix('imitator')
     ->name('imitator.')
     ->group(function (): void {

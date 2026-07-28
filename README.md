@@ -7,7 +7,7 @@ Local-only Entra user imitation for Laravel applications. Search Microsoft Graph
 - PHP 8.2+
 - Laravel 12 or 13
 - `APP_ENV=local` (the package does not register routes outside local)
-- An authenticated session in the host app (routes use the `auth` middleware)
+- A Laravel auth guard user (`Auth::check()` / `Auth::user()`) — session-only OIDC without `Auth::login()` is not enough
 - An Entra app registration with application permission to search users (typically `User.Read.All`)
 
 ## Quick Start
@@ -33,9 +33,15 @@ IMITATOR_AZURE_CLIENT_ID=your_client_id
 IMITATOR_AZURE_CLIENT_SECRET=your_client_secret
 ```
 
+If your app has no `route('login')` (for example Okta OIDC), also set:
+
+```env
+IMITATOR_REDIRECT_GUESTS_TO=/auth/oidc/login
+```
+
 ### 4. Open the imitator UI
 
-Sign in to your app as usual, then visit:
+Sign in to your app as usual (so `Auth::user()` is populated), then visit:
 
 ```text
 /imitator
@@ -43,13 +49,13 @@ Sign in to your app as usual, then visit:
 
 Search for an Entra user, start imitation, use the app as that user, then stop from the banner or the imitator page.
 
-That's it for UA-shaped user models (string Entra object id as the primary key). If your `users` table uses auto-increment ids, see [User Mapping](#user-mapping).
+That's it for UA-shaped user models (string Entra object id as the primary key). If your `users` table uses auto-increment ids, see [User Mapping](#user-mapping). For Okta OIDC hosts, see [Authentication](#authentication).
 
 ## How It Works
 
 ### Starting (or switching) imitation
 
-1. You must already be authenticated in the host app
+1. You must already be authenticated via Laravel's auth guard (`Auth::user()`)
 2. You select an Entra user from Graph search
 3. The package **upserts** a local user from the Graph payload using your configured attribute map
 4. On the **first** start in a session, it **snapshots** the entire current session (except the imitator bag)
@@ -67,7 +73,7 @@ If you start imitation again while already imitating, the **original snapshot is
 
 ## Routes
 
-Routes register only when `APP_ENV=local`, under the `imitator` prefix, with `web`, `auth`, and `imitator.local` middleware:
+Routes register only when `APP_ENV=local`, under the `imitator` prefix. Default middleware is `web`, `imitator.auth`, and `imitator.local` (configurable via `imitator.middleware`):
 
 | Method   | URI               | Name              | Purpose                          |
 |----------|-------------------|-------------------|----------------------------------|
@@ -75,6 +81,36 @@ Routes register only when `APP_ENV=local`, under the `imitator` prefix, with `we
 | `GET`    | `/imitator/search`| `imitator.search` | Graph user search (JSON)         |
 | `POST`   | `/imitator`       | `imitator.store`  | Start or switch imitation        |
 | `DELETE` | `/imitator`       | `imitator.destroy`| Stop and restore original session|
+
+## Authentication
+
+Imitator requires a real Laravel auth user (`Auth::user()`), not only an OIDC session bag.
+
+`imitator.auth` checks the default guard. Unauthenticated guests are redirected to:
+
+1. `config('imitator.redirect_guests_to')` when set, otherwise
+2. `route('login')` when that route exists, otherwise
+3. HTTP `401`
+
+### Apps with a `login` route
+
+No extra config — the fallback to `route('login')` is enough.
+
+### Okta OIDC hosts (`ua/okta-oidc`)
+
+1. Point guests at the OIDC login path:
+
+```env
+IMITATOR_REDIRECT_GUESTS_TO=/auth/oidc/login
+```
+
+```php
+'redirect_guests_to' => env('IMITATOR_REDIRECT_GUESTS_TO', '/auth/oidc/login'),
+```
+
+2. Use a bootstrapper that calls `Auth::login()`, such as `EloquentUserBootstrapper`. Session-only bootstrappers leave `Auth::user()` empty, so `/imitator` will keep treating you as a guest.
+
+3. Optionally rewrite Okta session keys while imitating — see [Session attributes](#session-attributes-optional).
 
 ## User Mapping
 
@@ -173,6 +209,28 @@ php artisan vendor:publish --tag=imitator-views
 
 This is the main difference from packages that exit proxy mode by flushing the session and forcing a full logout.
 
+### Session attributes (optional)
+
+Some host apps identify the current user with session keys (for example `session('username')` from `ua/okta-oidc`) instead of `Auth::user()`. Configure `imitator.session` to rewrite those keys on start/switch:
+
+```php
+'session' => [
+    'username' => 'okta_principal', // uses config('okta-oidc.principal_resolver')
+    'okta.name' => 'name',
+    'okta.email' => 'email',
+    'okta.session_expires_at' => 'preserve',
+],
+```
+
+| Source | Behavior |
+|--------|----------|
+| Entra sources (`id`, `name`, `email`, `userPrincipalName`, `username`, `job_title`) | Resolved from the Graph payload used to start imitation |
+| `okta_principal` | Calls `config('okta-oidc.principal_resolver')` with Entra UPN mapped to `preferred_username` (stays in sync with Okta login) |
+| `preserve` | Copies that session key from the original snapshot (useful for Okta expiry) |
+| `expires_at` | Sets `now + session_expires_in` seconds as an ISO-8601 timestamp |
+
+Stopping imitation restores the snapshotted session, so original keys come back automatically.
+
 ## Graph Search Filters
 
 Search uses client credentials against Microsoft Graph. Results are filtered with UA defaults:
@@ -205,6 +263,10 @@ Publish with `php artisan vendor:publish --tag=imitator-config`.
 | `user.unique_by` | `env('IMITATOR_USER_UNIQUE_BY', 'id')` | Local column used to find/create the user |
 | `user.attributes` | UA Entra map (see above) | Local column → Entra source key |
 | `user.create_only` | `[]` | Attributes set only on create (`'random'` supported) |
+| `session` | `[]` | Session key → source written after clean slate on start/switch |
+| `session_expires_in` | `env('IMITATOR_SESSION_EXPIRES_IN', 28800)` | Seconds used by the `expires_at` session source |
+| `middleware` | `['web', 'imitator.auth', 'imitator.local']` | Middleware stack for imitator routes |
+| `redirect_guests_to` | `env('IMITATOR_REDIRECT_GUESTS_TO')` | Guest redirect URL; falls back to `route('login')` |
 | `inject_banner` | `env('IMITATOR_INJECT_BANNER', true)` | Auto-inject imitating banner into HTML responses |
 | `azure.tenant_id` | `env('IMITATOR_AZURE_TENANT_ID')` | Entra tenant id |
 | `azure.client_id` | `env('IMITATOR_AZURE_CLIENT_ID')` | App registration client id |
@@ -218,5 +280,5 @@ Publish with `php artisan vendor:publish --tag=imitator-config`.
 - The package only registers routes and banner middleware when `APP_ENV=local`. Outside local it stays inert.
 - Install as **`require-dev` only**. Never ship this to shared test or production environments.
 - Graph credentials use the **client credentials** flow. The Entra app needs permission to read/search users (typically application `User.Read.All`), granted admin consent.
-- There is **no admin Gate**. Any authenticated user in a local app with this package installed can start and stop imitation.
+- There is **no admin Gate**. Any authenticated Laravel user (`Auth::check()`) in a local app with this package installed can start and stop imitation.
 - Stopping imitation restores the original session snapshot; it does not depend on the target user remaining an admin.

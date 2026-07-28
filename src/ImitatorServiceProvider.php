@@ -6,6 +6,7 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 use Uadevteampackages\Imitator\Graph\GraphClient;
+use Uadevteampackages\Imitator\Http\Middleware\EnsureAuthenticated;
 use Uadevteampackages\Imitator\Http\Middleware\EnsureLocalEnvironment;
 use Uadevteampackages\Imitator\Http\Middleware\InjectImitatorBanner;
 
@@ -46,6 +47,7 @@ class ImitatorServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('imitator.local', EnsureLocalEnvironment::class);
+        $router->aliasMiddleware('imitator.auth', EnsureAuthenticated::class);
 
         if (! config('imitator.inject_banner', true)) {
             return;

@@ -35,6 +35,69 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session attributes
+    |--------------------------------------------------------------------------
+    |
+    | Map of session key => source written after the clean slate on start/switch.
+    | Use this for host apps that identify the current user via session keys
+    | (for example Okta OIDC's session('username')) instead of Auth::user().
+    |
+    | Sources:
+    |   - Same Entra sources as user.attributes: id, name, email,
+    |     userPrincipalName, job_title, username
+    |   - "preserve" — copy the key's value from the original session snapshot
+    |   - "expires_at" — now + session_expires_in seconds (ISO-8601)
+    |   - "okta_principal" — call okta-oidc.principal_resolver (ua/okta-oidc)
+    |     with the Entra user adapted to an OIDC-like preferred_username claim
+    |
+    | Example for ua/okta-oidc hosts:
+    |
+    | 'session' => [
+    |     'username' => 'okta_principal',
+    |     'okta.name' => 'name',
+    |     'okta.email' => 'email',
+    |     'okta.session_expires_at' => 'preserve',
+    | ],
+    |
+    */
+
+    'session' => [
+        // 'username' => 'okta_principal',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Session expiry helper
+    |--------------------------------------------------------------------------
+    |
+    | Used when a session map entry uses the "expires_at" source.
+    |
+    */
+
+    'session_expires_in' => (int) env('IMITATOR_SESSION_EXPIRES_IN', 60 * 60 * 8),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route middleware
+    |--------------------------------------------------------------------------
+    */
+
+    'middleware' => ['web', 'imitator.auth', 'imitator.local'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Guest redirect
+    |--------------------------------------------------------------------------
+    |
+    | Where to send unauthenticated users. If null, falls back to route('login').
+    | For Okta OIDC hosts, set this to your OIDC login path, e.g. /auth/oidc/login.
+    |
+    */
+
+    'redirect_guests_to' => env('IMITATOR_REDIRECT_GUESTS_TO'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Banner injection
     |--------------------------------------------------------------------------
     |

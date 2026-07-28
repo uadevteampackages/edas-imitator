@@ -46,8 +46,10 @@ class Imitator
 
     /**
      * Start imitating $target, or switch targets while keeping the original snapshot.
+     *
+     * @param  array{id?: string, name?: string, userPrincipalName?: string, email?: string|null, job_title?: string|null}|null  $entraUser
      */
-    public function start(Authenticatable $original, Authenticatable $target): void
+    public function start(Authenticatable $original, Authenticatable $target, ?array $entraUser = null): void
     {
         if (! $this->active()) {
             session()->put($this->sessionKey('snapshot'), $this->captureSessionSnapshot());
@@ -59,6 +61,7 @@ class Imitator
 
         $this->applyCleanSlate();
         $this->login($target);
+        $this->applySessionAttributes($entraUser ?? []);
     }
 
     public function stop(): void
@@ -171,6 +174,147 @@ class Imitator
         }
 
         session()->put(self::SESSION_KEY, $bag);
+    }
+
+    /**
+     * Write configured host-app session keys for the imitated user.
+     *
+     * @param  array{id?: string, name?: string, userPrincipalName?: string, email?: string|null, job_title?: string|null}  $entraUser
+     */
+    private function applySessionAttributes(array $entraUser): void
+    {
+        /** @var array<string, string> $map */
+        $map = config('imitator.session', []);
+
+        if ($map === []) {
+            return;
+        }
+
+        /** @var array<string, mixed> $snapshot */
+        $snapshot = session($this->sessionKey('snapshot'), []);
+
+        foreach ($map as $sessionKey => $source) {
+            if (! is_string($sessionKey) || $sessionKey === '' || ! is_string($source) || $source === '') {
+                continue;
+            }
+
+            $value = $this->resolveSessionValue($sessionKey, $source, $entraUser, $snapshot);
+
+            if ($value === null) {
+                continue;
+            }
+
+            session()->put($sessionKey, $value);
+        }
+    }
+
+    /**
+     * @param  array{id?: string, name?: string, userPrincipalName?: string, email?: string|null, job_title?: string|null}  $entraUser
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function resolveSessionValue(string $sessionKey, string $source, array $entraUser, array $snapshot): mixed
+    {
+        if ($source === 'preserve') {
+            return data_get($snapshot, $sessionKey);
+        }
+
+        if ($source === 'expires_at') {
+            $seconds = (int) config('imitator.session_expires_in', 60 * 60 * 8);
+
+            return now()->addSeconds(max(0, $seconds))->toIso8601String();
+        }
+
+        if ($source === 'okta_principal') {
+            return $this->resolveOktaPrincipal($entraUser);
+        }
+
+        if ($entraUser === []) {
+            return null;
+        }
+
+        $value = $this->resolveSourceValue($entraUser, $source);
+
+        if (is_string($value) && in_array($source, ['email', 'userPrincipalName', 'username'], true)) {
+            return strtolower($value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Delegate to the host app's ua/okta-oidc principal_resolver so imitation
+     * writes the same principal shape Okta would after a real login.
+     *
+     * @param  array{id?: string, name?: string, userPrincipalName?: string, email?: string|null, job_title?: string|null}  $entraUser
+     */
+    private function resolveOktaPrincipal(array $entraUser): ?string
+    {
+        if ($entraUser === []) {
+            return null;
+        }
+
+        $resolverClass = config('okta-oidc.principal_resolver');
+
+        if (! is_string($resolverClass) || $resolverClass === '' || ! class_exists($resolverClass)) {
+            throw new \RuntimeException(
+                'imitator.session source [okta_principal] requires okta-oidc.principal_resolver to be a resolvable class.',
+            );
+        }
+
+        $resolver = app($resolverClass);
+
+        if (! is_object($resolver) || ! method_exists($resolver, 'resolve')) {
+            throw new \RuntimeException(
+                'okta-oidc.principal_resolver must resolve to an object with a resolve() method.',
+            );
+        }
+
+        $preferredUsername = $entraUser['userPrincipalName'] ?? $entraUser['email'] ?? null;
+
+        if (! filled($preferredUsername)) {
+            return null;
+        }
+
+        $oidcUser = new class($entraUser, (string) $preferredUsername)
+        {
+            /**
+             * @param  array{id?: string, name?: string, userPrincipalName?: string, email?: string|null, job_title?: string|null}  $entraUser
+             */
+            public function __construct(
+                private array $entraUser,
+                private string $preferredUsername,
+            ) {}
+
+            /**
+             * @return array<string, mixed>
+             */
+            public function getRaw(): array
+            {
+                return [
+                    'preferred_username' => $this->preferredUsername,
+                    'email' => ($this->entraUser['email'] ?? null) ?: $this->preferredUsername,
+                    'name' => $this->entraUser['name'] ?? null,
+                ];
+            }
+
+            public function getEmail(): ?string
+            {
+                $email = ($this->entraUser['email'] ?? null) ?: $this->preferredUsername;
+
+                return is_string($email) ? $email : null;
+            }
+
+            public function getName(): ?string
+            {
+                $name = $this->entraUser['name'] ?? null;
+
+                return is_string($name) ? $name : null;
+            }
+        };
+
+        $principal = $resolver->resolve($oidcUser, request());
+
+        return filled($principal) ? (string) $principal : null;
     }
 
     private function login(Authenticatable $user): void
