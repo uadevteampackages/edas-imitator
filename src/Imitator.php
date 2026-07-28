@@ -3,6 +3,7 @@
 namespace Uadevteampackages\Imitator;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -79,24 +80,55 @@ class Imitator
     }
 
     /**
-     * Upsert a local user from Graph/Entra payload using the UA user shape.
+     * Upsert a local user from Graph/Entra payload using the configured attribute map.
      *
      * @param  array{id: string, name: string, userPrincipalName: string, email?: string|null, job_title?: string|null}  $userData
      */
     public function upsertUserFromEntra(array $userData): Authenticatable
     {
-        $modelClass = $this->userModel();
+        $uniqueBy = $this->uniqueByColumn();
+        $uniqueValue = $this->resolveMappedValue($userData, $uniqueBy);
 
-        return $modelClass::query()->updateOrCreate(
-            ['id' => $userData['id']],
-            [
-                'name' => $userData['name'],
-                'email' => ($userData['email'] ?? null) ?: $userData['userPrincipalName'],
-                'principal_name' => $userData['userPrincipalName'],
-                'username' => strtolower(Str::before($userData['userPrincipalName'], '@')),
-                'job_title' => $userData['job_title'] ?? null,
-            ],
-        );
+        if ($uniqueValue === null || $uniqueValue === '') {
+            throw new \InvalidArgumentException("Imitator cannot resolve unique key [{$uniqueBy}] from Entra payload.");
+        }
+
+        /** @var Model&Authenticatable $user */
+        $user = $this->userModel()::query()->firstOrNew([
+            $uniqueBy => $uniqueValue,
+        ]);
+
+        $isNew = ! $user->exists;
+
+        foreach ($this->attributeMap() as $column => $source) {
+            $user->setAttribute($column, $this->resolveSourceValue($userData, $source));
+        }
+
+        if ($isNew) {
+            foreach ($this->createOnlyAttributes() as $column => $value) {
+                $user->setAttribute($column, $this->resolveCreateOnlyValue($value));
+            }
+        }
+
+        $user->save();
+
+        return $user;
+    }
+
+    /**
+     * @param  array{id: string, name: string, userPrincipalName: string, email?: string|null, job_title?: string|null}  $userData
+     */
+    public function targetsSameUser(Authenticatable $original, array $userData): bool
+    {
+        $uniqueBy = $this->uniqueByColumn();
+        $incoming = $this->resolveMappedValue($userData, $uniqueBy);
+        $current = data_get($original, $uniqueBy);
+
+        if ($incoming === null || $incoming === '' || $current === null || $current === '') {
+            return false;
+        }
+
+        return (string) $incoming === (string) $current;
     }
 
     /**
@@ -151,14 +183,83 @@ class Imitator
     }
 
     /**
-     * @return class-string<Authenticatable>
+     * @return class-string<Model&Authenticatable>
      */
     private function userModel(): string
     {
-        /** @var class-string<Authenticatable> $model */
-        $model = (string) config('imitator.user_model');
+        /** @var class-string<Model&Authenticatable> $model */
+        $model = (string) config('imitator.user.model', config('imitator.user_model', 'App\\Models\\User'));
 
         return $model;
+    }
+
+    private function uniqueByColumn(): string
+    {
+        return (string) config('imitator.user.unique_by', 'id');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function attributeMap(): array
+    {
+        /** @var array<string, string> $map */
+        $map = config('imitator.user.attributes', [
+            'id' => 'id',
+            'name' => 'name',
+            'email' => 'email',
+            'principal_name' => 'userPrincipalName',
+            'username' => 'username',
+            'job_title' => 'job_title',
+        ]);
+
+        return $map;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function createOnlyAttributes(): array
+    {
+        /** @var array<string, mixed> $attributes */
+        $attributes = config('imitator.user.create_only', []);
+
+        return $attributes;
+    }
+
+    /**
+     * @param  array{id: string, name: string, userPrincipalName: string, email?: string|null, job_title?: string|null}  $userData
+     */
+    private function resolveMappedValue(array $userData, string $column): mixed
+    {
+        $source = $this->attributeMap()[$column] ?? $column;
+
+        return $this->resolveSourceValue($userData, $source);
+    }
+
+    /**
+     * @param  array{id: string, name: string, userPrincipalName: string, email?: string|null, job_title?: string|null}  $userData
+     */
+    private function resolveSourceValue(array $userData, string $source): mixed
+    {
+        return match ($source) {
+            'id' => $userData['id'],
+            'name' => $userData['name'],
+            'email' => ($userData['email'] ?? null) ?: $userData['userPrincipalName'],
+            'userPrincipalName' => $userData['userPrincipalName'],
+            'job_title' => $userData['job_title'] ?? null,
+            'username' => strtolower(Str::before($userData['userPrincipalName'], '@')),
+            default => $userData[$source] ?? null,
+        };
+    }
+
+    private function resolveCreateOnlyValue(mixed $value): mixed
+    {
+        if ($value === 'random') {
+            return Str::password(40);
+        }
+
+        return $value;
     }
 
     private function guardName(): string

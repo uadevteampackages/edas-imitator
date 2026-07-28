@@ -30,7 +30,19 @@ abstract class TestCase extends Orchestra
             'prefix' => '',
         ]);
         $app['config']->set('auth.providers.users.model', User::class);
-        $app['config']->set('imitator.user_model', User::class);
+        $app['config']->set('imitator.user', [
+            'model' => User::class,
+            'unique_by' => 'id',
+            'attributes' => [
+                'id' => 'id',
+                'name' => 'name',
+                'email' => 'email',
+                'principal_name' => 'userPrincipalName',
+                'username' => 'username',
+                'job_title' => 'job_title',
+            ],
+            'create_only' => [],
+        ]);
         $app['config']->set('imitator.inject_banner', true);
         $app['config']->set('imitator.azure', [
             'tenant_id' => 'test-tenant',

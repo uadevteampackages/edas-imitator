@@ -4,6 +4,7 @@ namespace Uadevteampackages\Imitator\Tests\Unit;
 
 use Illuminate\Support\Facades\Auth;
 use Uadevteampackages\Imitator\Imitator;
+use Uadevteampackages\Imitator\Tests\Models\StandardUser;
 use Uadevteampackages\Imitator\Tests\Models\User;
 use Uadevteampackages\Imitator\Tests\TestCase;
 
@@ -126,5 +127,87 @@ class ImitatorTest extends TestCase
         $this->assertSame('graph.user@ua.edu', $user->principal_name);
         $this->assertSame('graph.user', $user->username);
         $this->assertSame('Analyst', $user->job_title);
+    }
+
+    public function test_upsert_can_match_standard_users_by_email(): void
+    {
+        config([
+            'imitator.user' => [
+                'model' => StandardUser::class,
+                'unique_by' => 'email',
+                'attributes' => [
+                    'name' => 'name',
+                    'email' => 'email',
+                ],
+                'create_only' => [
+                    'password' => 'random',
+                ],
+            ],
+        ]);
+
+        $imitator = $this->app->make(Imitator::class);
+
+        $created = $imitator->upsertUserFromEntra([
+            'id' => 'entra-guid-1',
+            'name' => 'Standard User',
+            'userPrincipalName' => 'standard.user@ua.edu',
+            'email' => 'standard.user@ua.edu',
+        ]);
+
+        $this->assertInstanceOf(StandardUser::class, $created);
+        $this->assertIsInt($created->id);
+        $this->assertSame('Standard User', $created->name);
+        $this->assertSame('standard.user@ua.edu', $created->email);
+        $this->assertNotEmpty($created->password);
+
+        $updated = $imitator->upsertUserFromEntra([
+            'id' => 'entra-guid-1',
+            'name' => 'Standard User Updated',
+            'userPrincipalName' => 'standard.user@ua.edu',
+            'email' => 'standard.user@ua.edu',
+        ]);
+
+        $this->assertSame($created->id, $updated->id);
+        $this->assertSame('Standard User Updated', $updated->name);
+        $this->assertSame(1, StandardUser::query()->count());
+    }
+
+    public function test_targets_same_user_compares_configured_unique_key(): void
+    {
+        config([
+            'imitator.user' => [
+                'model' => StandardUser::class,
+                'unique_by' => 'email',
+                'attributes' => [
+                    'name' => 'name',
+                    'email' => 'email',
+                ],
+                'create_only' => [
+                    'password' => 'random',
+                ],
+            ],
+        ]);
+
+        $original = StandardUser::query()->create([
+            'name' => 'Me',
+            'email' => 'me@ua.edu',
+            'password' => 'secret-password',
+        ]);
+
+        $imitator = $this->app->make(Imitator::class);
+
+        $this->assertTrue($imitator->targetsSameUser($original, [
+            'id' => 'different-entra-id',
+            'name' => 'Me',
+            'userPrincipalName' => 'me@ua.edu',
+            'email' => 'me@ua.edu',
+        ]));
+
+        $this->assertFalse($imitator->targetsSameUser($original, [
+            'id' => 'different-entra-id',
+            'name' => 'Other',
+            'userPrincipalName' => 'other@ua.edu',
+            'email' => 'other@ua.edu',
+        ]));
     }
 }

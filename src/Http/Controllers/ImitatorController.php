@@ -62,7 +62,7 @@ class ImitatorController extends Controller
             'user.job_title' => ['nullable', 'string'],
         ]);
 
-        if ($validated['user']['id'] === (string) $original->getAuthIdentifier()) {
+        if ($this->imitator->targetsSameUser($original, $validated['user'])) {
             throw ValidationException::withMessages([
                 'user.id' => 'You cannot imitate yourself.',
             ]);

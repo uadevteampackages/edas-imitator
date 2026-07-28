@@ -4,15 +4,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | User model
+    | Local user materialization
     |--------------------------------------------------------------------------
     |
-    | Must use the UA Entra user shape: string primary key (Entra object id),
-    | plus name, email, principal_name, username, and job_title columns.
+    | unique_by: local column used to find/create the user (e.g. "id" or "email").
+    | attributes: map of local column => Entra source key.
+    |   Sources: id, name, email, userPrincipalName, job_title, username
+    |   (username is derived from the UPN local-part; email falls back to UPN)
+    | create_only: attributes set only when creating a new user.
+    |   Use "random" to generate a random string (for password columns with a
+    |   hashed cast, pass plain "random" and let the model hash it).
     |
     */
 
-    'user_model' => env('IMITATOR_USER_MODEL', 'App\\Models\\User'),
+    'user' => [
+        'model' => env('IMITATOR_USER_MODEL', 'App\\Models\\User'),
+        'unique_by' => env('IMITATOR_USER_UNIQUE_BY', 'id'),
+        'attributes' => [
+            'id' => 'id',
+            'name' => 'name',
+            'email' => 'email',
+            'principal_name' => 'userPrincipalName',
+            'username' => 'username',
+            'job_title' => 'job_title',
+        ],
+        'create_only' => [
+            // 'password' => 'random',
+        ],
+    ],
 
     /*
     |--------------------------------------------------------------------------
