@@ -14,6 +14,14 @@ Local-only Entra user imitation for Laravel applications. Search Microsoft Graph
 
 ### 1. Install the package
 
+Until a stable release is tagged, require the RC with an explicit stability flag (most Laravel apps use `"minimum-stability": "stable"`, which will reject a bare `composer require`):
+
+```bash
+composer require 'uadevteampackages/imitator:^0.1.0@RC' --dev
+```
+
+After a stable `v0.1.0` (or later) is published, this will work instead:
+
 ```bash
 composer require uadevteampackages/imitator --dev
 ```
