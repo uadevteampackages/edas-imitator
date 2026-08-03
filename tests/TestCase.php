@@ -23,6 +23,7 @@ abstract class TestCase extends Orchestra
         $app->detectEnvironment(fn (): string => 'local');
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
         $app['config']->set('app.env', 'local');
+        $app['config']->set('imitator.enabled', true);
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [
             'driver' => 'sqlite',

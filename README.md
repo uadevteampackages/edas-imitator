@@ -6,7 +6,7 @@ Local-only Entra user imitation for Laravel applications. Search Microsoft Graph
 
 - PHP 8.2+
 - Laravel 12 or 13
-- `APP_ENV=local` (the package does not register routes outside local)
+- `IMITATOR_ENABLED=true` and an `APP_ENV` that does **not** start with `prod` (case-insensitive) — otherwise the package stays inert
 - A Laravel auth guard user (`Auth::check()` / `Auth::user()`) — session-only OIDC without `Auth::login()` is not enough
 - An Entra app registration with application permission to search users (typically `User.Read.All`)
 
@@ -28,6 +28,7 @@ php artisan vendor:publish --tag=imitator-config
 
 ```env
 APP_ENV=local
+IMITATOR_ENABLED=true
 IMITATOR_AZURE_TENANT_ID=your_tenant_id
 IMITATOR_AZURE_CLIENT_ID=your_client_id
 IMITATOR_AZURE_CLIENT_SECRET=your_client_secret
@@ -73,7 +74,7 @@ If you start imitation again while already imitating, the **original snapshot is
 
 ## Routes
 
-Routes register only when `APP_ENV=local`, under the `imitator` prefix. Default middleware is `web`, `imitator.auth`, and `imitator.local` (configurable via `imitator.middleware`):
+Routes register only when the package is enabled (`IMITATOR_ENABLED=true` and `APP_ENV` does not start with `prod`), under the `imitator` prefix. Default middleware is `web`, `imitator.auth`, and `imitator.local` (configurable via `imitator.middleware`):
 
 | Method   | URI               | Name              | Purpose                          |
 |----------|-------------------|-------------------|----------------------------------|
@@ -259,6 +260,7 @@ Publish with `php artisan vendor:publish --tag=imitator-config`.
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `enabled` | `env('IMITATOR_ENABLED', false)` | Must be true to register routes/banner; still inert if `APP_ENV` starts with `prod` |
 | `user.model` | `env('IMITATOR_USER_MODEL', 'App\\Models\\User')` | Eloquent user model |
 | `user.unique_by` | `env('IMITATOR_USER_UNIQUE_BY', 'id')` | Local column used to find/create the user |
 | `user.attributes` | UA Entra map (see above) | Local column → Entra source key |
@@ -277,8 +279,8 @@ Publish with `php artisan vendor:publish --tag=imitator-config`.
 
 ## Security Notes
 
-- The package only registers routes and banner middleware when `APP_ENV=local`. Outside local it stays inert.
+- The package only registers routes and banner middleware when `IMITATOR_ENABLED=true` **and** `APP_ENV` does not start with `prod` (case-insensitive, e.g. `production`, `prod`, `Prod`). Otherwise it stays inert.
 - Install as **`require-dev` only**. Never ship this to shared test or production environments.
 - Graph credentials use the **client credentials** flow. The Entra app needs permission to read/search users (typically application `User.Read.All`), granted admin consent.
-- There is **no admin Gate**. Any authenticated Laravel user (`Auth::check()`) in a local app with this package installed can start and stop imitation.
+- There is **no admin Gate**. Any authenticated Laravel user (`Auth::check()`) in an enabled non-prod app with this package installed can start and stop imitation.
 - Stopping imitation restores the original session snapshot; it does not depend on the target user remaining an admin.

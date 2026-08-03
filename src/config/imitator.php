@@ -4,6 +4,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Enable imitator
+    |--------------------------------------------------------------------------
+    |
+    | Must be true for routes and banner middleware to register. Even when
+    | enabled, the package stays inert if APP_ENV starts with "prod"
+    | (case-insensitive), e.g. production, prod, Prod.
+    |
+    */
+
+    'enabled' => env('IMITATOR_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Local user materialization
     |--------------------------------------------------------------------------
     |
@@ -45,7 +58,9 @@ return [
     | Sources:
     |   - Same Entra sources as user.attributes: id, name, email,
     |     userPrincipalName, job_title, username
-    |   - "preserve" — copy the key's value from the original session snapshot
+    |   - "preserve" — copy the key's value from the original session snapshot.
+    |     For keys whose name contains "expires", a missing/past timestamp is
+    |     refreshed to now + session_expires_in (keeps okta-oidc.auth happy).
     |   - "expires_at" — now + session_expires_in seconds (ISO-8601)
     |   - "okta_principal" — call okta-oidc.principal_resolver (ua/okta-oidc)
     |     with the Entra user adapted to an OIDC-like preferred_username claim
@@ -56,7 +71,7 @@ return [
     |     'username' => 'okta_principal',
     |     'okta.name' => 'name',
     |     'okta.email' => 'email',
-    |     'okta.session_expires_at' => 'preserve',
+    |     'okta.session_expires_at' => 'preserve', // refreshes if already expired
     | ],
     |
     */

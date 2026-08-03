@@ -12,6 +12,31 @@ use Uadevteampackages\Imitator\Tests\TestCase;
 
 class ImitatorTest extends TestCase
 {
+    public function test_enabled_requires_flag_and_non_prod_environment(): void
+    {
+        $imitator = $this->app->make(Imitator::class);
+
+        config(['imitator.enabled' => true]);
+        $this->app['env'] = 'local';
+        $this->assertTrue($imitator->enabled());
+
+        $this->app['env'] = 'testing';
+        $this->assertTrue($imitator->enabled());
+
+        $this->app['env'] = 'production';
+        $this->assertFalse($imitator->enabled());
+
+        $this->app['env'] = 'Prod';
+        $this->assertFalse($imitator->enabled());
+
+        $this->app['env'] = 'prod-replica';
+        $this->assertFalse($imitator->enabled());
+
+        config(['imitator.enabled' => false]);
+        $this->app['env'] = 'local';
+        $this->assertFalse($imitator->enabled());
+    }
+
     public function test_start_snapshots_session_applies_clean_slate_and_logs_in_target(): void
     {
         $original = User::query()->create([
@@ -464,5 +489,78 @@ class ImitatorTest extends TestCase
 
         $this->assertSame('original', session('username'));
         $this->assertSame($expiresAt, session('okta.session_expires_at'));
+    }
+
+    public function test_preserve_refreshes_expired_session_expiry_keys(): void
+    {
+        config([
+            'imitator.session' => [
+                'username' => 'username',
+                'okta.session_expires_at' => 'preserve',
+            ],
+            'imitator.session_expires_in' => 120,
+        ]);
+
+        $original = User::query()->create([
+            'id' => 'original-id',
+            'name' => 'Original User',
+            'email' => 'original@ua.edu',
+            'principal_name' => 'original@ua.edu',
+            'username' => 'original',
+        ]);
+
+        $target = User::query()->create([
+            'id' => 'target-id',
+            'name' => 'Target User',
+            'email' => 'target@ua.edu',
+            'principal_name' => 'target@ua.edu',
+            'username' => 'target',
+        ]);
+
+        Auth::login($original);
+        session([
+            'username' => 'original',
+            'okta.session_expires_at' => now()->subMinute()->toIso8601String(),
+        ]);
+
+        $this->travelTo(now());
+
+        $imitator = $this->app->make(Imitator::class);
+        $imitator->start($original, $target, [
+            'id' => 'target-id',
+            'name' => 'Target User',
+            'userPrincipalName' => 'target@ua.edu',
+        ]);
+
+        $this->assertSame(now()->addSeconds(120)->toIso8601String(), session('okta.session_expires_at'));
+    }
+
+    public function test_target_user_comes_from_stored_target_id_not_auth_guard(): void
+    {
+        $original = User::query()->create([
+            'id' => 'original-id',
+            'name' => 'Original User',
+            'email' => 'original@ua.edu',
+            'principal_name' => 'original@ua.edu',
+            'username' => 'original',
+        ]);
+
+        $target = User::query()->create([
+            'id' => 'target-id',
+            'name' => 'Target User',
+            'email' => 'target@ua.edu',
+            'principal_name' => 'target@ua.edu',
+            'username' => 'target',
+        ]);
+
+        Auth::login($original);
+
+        $imitator = $this->app->make(Imitator::class);
+        $imitator->start($original, $target);
+
+        Auth::login($original);
+
+        $this->assertSame('target-id', $imitator->targetUser()?->getAuthIdentifier());
+        $this->assertSame('Target User', $imitator->status()['targetUser']['name']);
     }
 }

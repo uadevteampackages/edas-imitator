@@ -13,7 +13,11 @@ class Imitator
 
     public function enabled(): bool
     {
-        return app()->environment('local');
+        if (! config('imitator.enabled', false)) {
+            return false;
+        }
+
+        return ! str_starts_with(strtolower((string) app()->environment()), 'prod');
     }
 
     public function active(): bool
@@ -34,6 +38,12 @@ class Imitator
 
     public function targetUser(): ?Authenticatable
     {
+        $targetUserId = session($this->sessionKey('target_user_id'));
+
+        if ($targetUserId) {
+            return $this->userModel()::query()->find($targetUserId);
+        }
+
         return Auth::guard($this->guardName())->user();
     }
 
@@ -215,13 +225,19 @@ class Imitator
     private function resolveSessionValue(string $sessionKey, string $source, array $entraUser, array $snapshot): mixed
     {
         if ($source === 'preserve') {
-            return data_get($snapshot, $sessionKey);
+            $value = data_get($snapshot, $sessionKey);
+
+            // Host okta-oidc.auth rejects past/missing expires_at and forces a
+            // re-login that can leave imitator metadata pointing at "yourself".
+            if ($this->shouldRefreshPreservedExpiry($sessionKey, $value)) {
+                return $this->freshExpiresAt();
+            }
+
+            return $value;
         }
 
         if ($source === 'expires_at') {
-            $seconds = (int) config('imitator.session_expires_in', 60 * 60 * 8);
-
-            return now()->addSeconds(max(0, $seconds))->toIso8601String();
+            return $this->freshExpiresAt();
         }
 
         if ($source === 'okta_principal') {
@@ -239,6 +255,30 @@ class Imitator
         }
 
         return $value;
+    }
+
+    private function freshExpiresAt(): string
+    {
+        $seconds = (int) config('imitator.session_expires_in', 60 * 60 * 8);
+
+        return now()->addSeconds(max(0, $seconds))->toIso8601String();
+    }
+
+    private function shouldRefreshPreservedExpiry(string $sessionKey, mixed $value): bool
+    {
+        if (! str_contains($sessionKey, 'expires')) {
+            return false;
+        }
+
+        if (! filled($value) || ! is_string($value)) {
+            return true;
+        }
+
+        try {
+            return ! now()->lt($value);
+        } catch (\Throwable) {
+            return true;
+        }
     }
 
     /**
